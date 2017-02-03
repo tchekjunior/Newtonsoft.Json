@@ -26,12 +26,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-#if !(NET20 || NET35 || PORTABLE40 || PORTABLE) || NETSTANDARD1_1
+#if HAVE_BIG_INTEGER
 using System.Numerics;
 #endif
 using Newtonsoft.Json.Utilities;
 using System.Globalization;
-#if NET20
+#if !HAVE_LINQ
 using Newtonsoft.Json.Utilities.LinqBridge;
 #else
 using System.Linq;
@@ -43,7 +43,7 @@ namespace Newtonsoft.Json
     /// <summary>
     /// Represents a writer that provides a fast, non-cached, forward-only way of generating JSON data.
     /// </summary>
-    public abstract class JsonWriter : IDisposable
+    public abstract partial class JsonWriter : IDisposable
     {
         internal enum State
         {
@@ -125,6 +125,14 @@ namespace Newtonsoft.Json
         /// <c>true</c> to close the destination when this writer is closed; otherwise <c>false</c>. The default is <c>true</c>.
         /// </value>
         public bool CloseOutput { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the JSON should be auto-completed when this writer is closed.
+        /// </summary>
+        /// <value>
+        /// <c>true</c> to auto-complete the JSON when this writer is closed; otherwise <c>false</c>. The default is <c>true</c>.
+        /// </value>
+        public bool AutoCompleteOnClose { get; set; }
 
         /// <summary>
         /// Gets the top.
@@ -339,6 +347,7 @@ namespace Newtonsoft.Json
             _dateTimeZoneHandling = DateTimeZoneHandling.RoundtripKind;
 
             CloseOutput = true;
+            AutoCompleteOnClose = true;
         }
 
         internal void UpdateScopeWithFinishedValue()
@@ -393,11 +402,15 @@ namespace Newtonsoft.Json
 
         /// <summary>
         /// Closes this writer.
-        /// If <see cref="JsonWriter.CloseOutput"/> is set to <c>true</c>, the destination is also closed.
+        /// If <see cref="CloseOutput"/> is set to <c>true</c>, the destination is also closed.
+        /// If <see cref="AutoCompleteOnClose"/> is set to <c>true</c>, the JSON is auto-completed.
         /// </summary>
         public virtual void Close()
         {
-            AutoCompleteAll();
+            if (AutoCompleteOnClose)
+            {
+                AutoCompleteAll();
+            }
         }
 
         /// <summary>
@@ -528,11 +541,11 @@ namespace Newtonsoft.Json
                     WritePropertyName(value.ToString());
                     break;
                 case JsonToken.Comment:
-                    WriteComment((value != null) ? value.ToString() : null);
+                    WriteComment(value?.ToString());
                     break;
                 case JsonToken.Integer:
                     ValidationUtils.ArgumentNotNull(value, nameof(value));
-#if !(NET20 || NET35 || PORTABLE || PORTABLE40) || NETSTANDARD1_1
+#if HAVE_BIG_INTEGER
                     if (value is BigInteger)
                     {
                         WriteValue((BigInteger)value);
@@ -587,7 +600,7 @@ namespace Newtonsoft.Json
                     break;
                 case JsonToken.Date:
                     ValidationUtils.ArgumentNotNull(value, nameof(value));
-#if !NET20
+#if HAVE_DATE_TIME_OFFSET
                     if (value is DateTimeOffset)
                     {
                         WriteValue((DateTimeOffset)value);
@@ -599,7 +612,7 @@ namespace Newtonsoft.Json
                     }
                     break;
                 case JsonToken.Raw:
-                    WriteRawValue((value != null) ? value.ToString() : null);
+                    WriteRawValue(value?.ToString());
                     break;
                 case JsonToken.Bytes:
                     ValidationUtils.ArgumentNotNull(value, nameof(value));
@@ -628,20 +641,7 @@ namespace Newtonsoft.Json
 
         internal virtual void WriteToken(JsonReader reader, bool writeChildren, bool writeDateConstructorAsDate, bool writeComments)
         {
-            int initialDepth;
-
-            if (reader.TokenType == JsonToken.None)
-            {
-                initialDepth = -1;
-            }
-            else if (!JsonTokenUtils.IsStartToken(reader.TokenType))
-            {
-                initialDepth = reader.Depth + 1;
-            }
-            else
-            {
-                initialDepth = reader.Depth;
-            }
+            int initialDepth = CalculateWriteTokenDepth(reader);
 
             do
             {
@@ -662,6 +662,17 @@ namespace Newtonsoft.Json
                 initialDepth - 1 < reader.Depth - (JsonTokenUtils.IsEndToken(reader.TokenType) ? 1 : 0)
                 && writeChildren
                 && reader.Read());
+        }
+
+        private int CalculateWriteTokenDepth(JsonReader reader)
+        {
+            JsonToken type = reader.TokenType;
+            if (type == JsonToken.None)
+            {
+                return -1;
+            }
+
+            return JsonTokenUtils.IsStartToken(type) ? reader.Depth : reader.Depth + 1;
         }
 
         private void WriteConstructorDate(JsonReader reader)
@@ -733,7 +744,33 @@ namespace Newtonsoft.Json
 
         private void AutoCompleteClose(JsonContainerType type)
         {
-            // write closing symbol and calculate new state
+            int levelsToComplete = CalculateLevelsToComplete(type);
+
+            for (int i = 0; i < levelsToComplete; i++)
+            {
+                JsonToken token = GetCloseTokenForType(Pop());
+
+                if (_currentState == State.Property)
+                {
+                    WriteNull();
+                }
+
+                if (_formatting == Formatting.Indented)
+                {
+                    if (_currentState != State.ObjectStart && _currentState != State.ArrayStart)
+                    {
+                        WriteIndent();
+                    }
+                }
+
+                WriteEnd(token);
+
+                UpdateCurrentState();
+            }
+        }
+
+        private int CalculateLevelsToComplete(JsonContainerType type)
+        {
             int levelsToComplete = 0;
 
             if (_currentPosition.Type == type)
@@ -760,44 +797,29 @@ namespace Newtonsoft.Json
                 throw JsonWriterException.Create(this, "No token to close.", null);
             }
 
-            for (int i = 0; i < levelsToComplete; i++)
+            return levelsToComplete;
+        }
+
+        private void UpdateCurrentState()
+        {
+            JsonContainerType currentLevelType = Peek();
+
+            switch (currentLevelType)
             {
-                JsonToken token = GetCloseTokenForType(Pop());
-
-                if (_currentState == State.Property)
-                {
-                    WriteNull();
-                }
-
-                if (_formatting == Formatting.Indented)
-                {
-                    if (_currentState != State.ObjectStart && _currentState != State.ArrayStart)
-                    {
-                        WriteIndent();
-                    }
-                }
-
-                WriteEnd(token);
-
-                JsonContainerType currentLevelType = Peek();
-
-                switch (currentLevelType)
-                {
-                    case JsonContainerType.Object:
-                        _currentState = State.Object;
-                        break;
-                    case JsonContainerType.Array:
-                        _currentState = State.Array;
-                        break;
-                    case JsonContainerType.Constructor:
-                        _currentState = State.Array;
-                        break;
-                    case JsonContainerType.None:
-                        _currentState = State.Start;
-                        break;
-                    default:
-                        throw JsonWriterException.Create(this, "Unknown JsonType: " + currentLevelType, null);
-                }
+                case JsonContainerType.Object:
+                    _currentState = State.Object;
+                    break;
+                case JsonContainerType.Array:
+                    _currentState = State.Array;
+                    break;
+                case JsonContainerType.Constructor:
+                    _currentState = State.Array;
+                    break;
+                case JsonContainerType.None:
+                    _currentState = State.Start;
+                    break;
+                default:
+                    throw JsonWriterException.Create(this, "Unknown JsonType: " + currentLevelType, null);
             }
         }
 
@@ -1040,7 +1062,7 @@ namespace Newtonsoft.Json
             InternalWriteValue(JsonToken.Date);
         }
 
-#if !NET20
+#if HAVE_DATE_TIME_OFFSET
         /// <summary>
         /// Writes a <see cref="DateTimeOffset"/> value.
         /// </summary>
@@ -1297,7 +1319,7 @@ namespace Newtonsoft.Json
             }
         }
 
-#if !NET20
+#if HAVE_DATE_TIME_OFFSET
         /// <summary>
         /// Writes a <see cref="Nullable{T}"/> of <see cref="DateTimeOffset"/> value.
         /// </summary>
@@ -1392,7 +1414,7 @@ namespace Newtonsoft.Json
             }
             else
             {
-#if !(NET20 || NET35 || PORTABLE || PORTABLE40) || NETSTANDARD1_1
+#if HAVE_BIG_INTEGER
                 // this is here because adding a WriteValue(BigInteger) to JsonWriter will
                 // mean the user has to add a reference to System.Numerics.dll
                 if (value is BigInteger)
@@ -1524,7 +1546,7 @@ namespace Newtonsoft.Json
                 case PrimitiveTypeCode.DateTimeNullable:
                     writer.WriteValue((value == null) ? (DateTime?)null : (DateTime)value);
                     break;
-#if !NET20
+#if HAVE_DATE_TIME_OFFSET
                 case PrimitiveTypeCode.DateTimeOffset:
                     writer.WriteValue((DateTimeOffset)value);
                     break;
@@ -1550,7 +1572,7 @@ namespace Newtonsoft.Json
                 case PrimitiveTypeCode.TimeSpanNullable:
                     writer.WriteValue((value == null) ? (TimeSpan?)null : (TimeSpan)value);
                     break;
-#if !(PORTABLE || PORTABLE40 || NET35 || NET20) || NETSTANDARD1_1
+#if HAVE_BIG_INTEGER
                 case PrimitiveTypeCode.BigInteger:
                     // this will call to WriteValue(object)
                     writer.WriteValue((BigInteger)value);
@@ -1569,13 +1591,13 @@ namespace Newtonsoft.Json
                 case PrimitiveTypeCode.Bytes:
                     writer.WriteValue((byte[])value);
                     break;
-#if !(PORTABLE || DOTNET)
+#if HAVE_DB_NULL_TYPE_CODE
                 case PrimitiveTypeCode.DBNull:
                     writer.WriteNull();
                     break;
 #endif
                 default:
-#if !PORTABLE
+#if HAVE_ICONVERTIBLE
                     IConvertible convertible = value as IConvertible;
                     if (convertible != null)
                     {

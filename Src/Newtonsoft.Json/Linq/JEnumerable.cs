@@ -25,7 +25,7 @@
 
 using System;
 using System.Collections.Generic;
-#if NET20
+#if !HAVE_LINQ
 using Newtonsoft.Json.Utilities.LinqBridge;
 #else
 using System.Linq;
@@ -67,12 +67,7 @@ namespace Newtonsoft.Json.Linq
         /// </returns>
         public IEnumerator<T> GetEnumerator()
         {
-            if (_enumerable == null)
-            {
-                return Empty.GetEnumerator();
-            }
-
-            return _enumerable.GetEnumerator();
+            return (_enumerable ?? Empty).GetEnumerator();
         }
 
         IEnumerator IEnumerable.GetEnumerator()

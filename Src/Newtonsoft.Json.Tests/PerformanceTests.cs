@@ -43,6 +43,7 @@ using Newtonsoft.Json.Bson;
 using System.Runtime.Serialization.Formatters.Binary;
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Converters;
+using System.Threading.Tasks;
 
 namespace Newtonsoft.Json.Tests
 {
@@ -86,6 +87,40 @@ namespace Newtonsoft.Json.Tests
         public const string JsonText =
             @"{""strings"":[null,""Markus egger ]><[, (2nd)"",null],""dictionary"":{""Val & asd1"":1,""Val2 & asd1"":3,""Val3 & asd1"":4},""Name"":""Rick"",""Now"":""\/Date(1262301136080+1300)\/"",""BigNumber"":34123123123.121,""Address1"":{""Street"":""fff Street"",""Phone"":""(503) 814-6335"",""Entered"":""\/Date(1264025536080+1300)\/""},""Addresses"":[{""Street"":""\u001farray<address"",""Phone"":""(503) 814-6335"",""Entered"":""\/Date(1262211136080+1300)\/""},{""Street"":""array 2 address"",""Phone"":""(503) 814-6335"",""Entered"":""\/Date(1262124736080+1300)\/""}]}";
 
+        public const string JsonIndentedText =
+            @"{
+  ""strings"": [
+    null,
+    ""Markus egger ]><[, (2nd)"",
+    null
+  ],
+  ""dictionary"": {
+    ""Val & asd1"": 1,
+    ""Val2 & asd1"": 3,
+    ""Val3 & asd1"": 4
+  },
+  ""Name"": ""Rick"",
+  ""Now"": ""/Date(1262301136080+1300)/"",
+  ""BigNumber"": 34123123123.121,
+  ""Address1"": {
+    ""Street"": ""fff Street"",
+    ""Phone"": ""(503) 814-6335"",
+    ""Entered"": ""/Date(1264025536080+1300)/""
+  },
+  ""Addresses"": [
+    {
+      ""Street"": ""\u001farray<address"",
+      ""Phone"": ""(503) 814-6335"",
+      ""Entered"": ""/Date(1262211136080+1300)/""
+    },
+    {
+      ""Street"": ""array 2 address"",
+      ""Phone"": ""(503) 814-6335"",
+      ""Entered"": ""/Date(1262124736080+1300)/""
+    }
+  ]
+}";
+
         private const string JsonIsoText =
             @"{""strings"":[null,""Markus egger ]><[, (2nd)"",null],""dictionary"":{""Val & asd1"":1,""Val2 & asd1"":3,""Val3 & asd1"":4},""Name"":""Rick"",""Now"":""2012-02-25T19:55:50.6095676+13:00"",""BigNumber"":34123123123.121,""Address1"":{""Street"":""fff Street"",""Phone"":""(503) 814-6335"",""Entered"":""2012-02-24T18:55:50.6095676+13:00""},""Addresses"":[{""Street"":""\u001farray<address"",""Phone"":""(503) 814-6335"",""Entered"":""2012-02-24T18:55:50.6095676+13:00""},{""Street"":""array 2 address"",""Phone"":""(503) 814-6335"",""Entered"":""2012-02-24T18:55:50.6095676+13:00""}]}";
 
@@ -99,6 +134,7 @@ namespace Newtonsoft.Json.Tests
             JsonNetBinary,
             JsonNetLinq,
             JsonNetManual,
+            JsonNetManualAsync,
             BinaryFormatter,
             JavaScriptSerializer,
             DataContractSerializer,
@@ -134,6 +170,48 @@ namespace Newtonsoft.Json.Tests
             TestClass test = CreateSerializationObject();
 
             SerializeTests(test);
+        }
+
+        [Test]
+        public async Task SerializeAsync()
+        {
+            TestClass test = CreateSerializationObject();
+
+            await BenchmarkSerializeMethodAsync(SerializeMethod.JsonNetManualAsync, test);
+        }
+
+        [Test]
+        public void TokenWriteTo()
+        {
+            JObject o = JObject.Parse(JsonText);
+
+            TimeOperation<JObject>(() =>
+            {
+                for (int i = 0; i < Iterations; i++)
+                {
+                    StringWriter sw = new StringWriter();
+                    o.WriteTo(new JsonTextWriter(sw));
+                }
+
+                return o;
+            }, "TokenWriteTo");
+        }
+
+        [Test]
+        public async Task TokenWriteToAsync()
+        {
+            JObject o = JObject.Parse(JsonText);
+
+            await TimeOperationAsync<JObject>(async () =>
+            {
+                for (int i = 0; i < Iterations; i++)
+                {
+                    StringWriter sw = new StringWriter();
+                    await o.WriteToAsync(new JsonTextWriter(sw));
+                }
+
+                return o;
+            }, "TokenWriteTo");
         }
 
         [Test]
@@ -196,7 +274,7 @@ namespace Newtonsoft.Json.Tests
         {
             var json = System.IO.File.ReadAllText("large.json");
 
-            BenchmarkDeserializeMethod<IList<RootObject>>(SerializeMethod.JsonNet, json, Iterations / 10, false);
+            BenchmarkDeserializeMethod<IList<RootObject>>(SerializeMethod.JsonNet, json, Math.Min(Iterations, 10), false);
         }
 
         [Test]
@@ -236,6 +314,18 @@ namespace Newtonsoft.Json.Tests
             DeserializeTests<TestClass>(JsonText);
             BenchmarkDeserializeMethod<TestClass>(SerializeMethod.JsonNetWithIsoConverter, JsonIsoText);
             BenchmarkDeserializeMethod<TestClass>(SerializeMethod.JsonNetBinary, HexToBytes(BsonHex));
+        }
+
+        [Test]
+        public async Task DeserializeAsync()
+        {
+            await BenchmarkDeserializeMethodAsync<TestClass>(SerializeMethod.JsonNetManualAsync, JsonText);
+        }
+
+        [Test]
+        public async Task DeserializeIndentedAsync()
+        {
+            await BenchmarkDeserializeMethodAsync<TestClass>(SerializeMethod.JsonNetManualAsync, JsonIndentedText);
         }
 
         public void DeserializeTests<T>(string json)
@@ -301,6 +391,24 @@ namespace Newtonsoft.Json.Tests
             timed.Start();
 
             T result = operation();
+
+            Console.WriteLine(name);
+            Console.WriteLine("{0} ms", timed.ElapsedMilliseconds);
+
+            timed.Stop();
+
+            return result;
+        }
+
+        private async Task<T> TimeOperationAsync<T>(Func<Task<T>> operation, string name)
+        {
+            // warm up
+            await operation();
+
+            Stopwatch timed = new Stopwatch();
+            timed.Start();
+
+            T result = await operation();
 
             Console.WriteLine(name);
             Console.WriteLine("{0} ms", timed.ElapsedMilliseconds);
@@ -641,6 +749,27 @@ If attributes are not mentioned, default values are used in each case.
         #region Serialize
         private static readonly byte[] Buffer = new byte[4096];
 
+        public async Task BenchmarkSerializeMethodAsync(SerializeMethod method, object value)
+        {
+            await SerializeAsync(method, value);
+
+            Stopwatch timed = new Stopwatch();
+            timed.Start();
+
+            string json = null;
+            for (int x = 0; x < Iterations; x++)
+            {
+                json = await SerializeAsync(method, value);
+            }
+
+            timed.Stop();
+
+            Console.WriteLine("Serialize method: {0}", method);
+            Console.WriteLine("{0} ms", timed.ElapsedMilliseconds);
+            Console.WriteLine(json);
+            Console.WriteLine();
+        }
+
         public void BenchmarkSerializeMethod(SerializeMethod method, object value)
         {
             Serialize(method, value);
@@ -738,6 +867,83 @@ If attributes are not mentioned, default values are used in each case.
             }
         }
 
+        private async Task<string> SerializeAsync(SerializeMethod method, object value)
+        {
+            string json;
+
+            switch (method)
+            {
+                case SerializeMethod.JsonNetManualAsync:
+                    {
+                        TestClass c = value as TestClass;
+                        if (c != null)
+                        {
+                            StringWriter sw = new StringWriter();
+                            JsonTextWriter writer = new JsonTextWriter(sw);
+                            await writer.WriteStartObjectAsync();
+                            await writer.WritePropertyNameAsync("strings");
+                            await writer.WriteStartArrayAsync();
+                            foreach (string s in c.strings)
+                            {
+                                await writer.WriteValueAsync(s);
+                            }
+                            await writer.WriteEndArrayAsync();
+                            await writer.WritePropertyNameAsync("dictionary");
+                            await writer.WriteStartObjectAsync();
+                            foreach (KeyValuePair<string, int> keyValuePair in c.dictionary)
+                            {
+                                await writer.WritePropertyNameAsync(keyValuePair.Key);
+                                await writer.WriteValueAsync(keyValuePair.Value);
+                            }
+                            await writer.WriteEndObjectAsync();
+                            await writer.WritePropertyNameAsync("Name");
+                            await writer.WriteValueAsync(c.Name);
+                            await writer.WritePropertyNameAsync("Now");
+                            await writer.WriteValueAsync(c.Now);
+                            await writer.WritePropertyNameAsync("BigNumber");
+                            await writer.WriteValueAsync(c.BigNumber);
+                            await writer.WritePropertyNameAsync("Address1");
+                            await writer.WriteStartObjectAsync();
+                            await writer.WritePropertyNameAsync("Street");
+                            await writer.WriteValueAsync(c.BigNumber);
+                            await writer.WritePropertyNameAsync("Street");
+                            await writer.WriteValueAsync(c.BigNumber);
+                            await writer.WritePropertyNameAsync("Street");
+                            await writer.WriteValueAsync(c.BigNumber);
+                            await writer.WriteEndObjectAsync();
+                            await writer.WritePropertyNameAsync("Addresses");
+                            await writer.WriteStartArrayAsync();
+                            foreach (Address address in c.Addresses)
+                            {
+                                await writer.WriteStartObjectAsync();
+                                await writer.WritePropertyNameAsync("Street");
+                                await writer.WriteValueAsync(address.Street);
+                                await writer.WritePropertyNameAsync("Phone");
+                                await writer.WriteValueAsync(address.Phone);
+                                await writer.WritePropertyNameAsync("Entered");
+                                await writer.WriteValueAsync(address.Entered);
+                                await writer.WriteEndObjectAsync();
+                            }
+                            await writer.WriteEndArrayAsync();
+                            await writer.WriteEndObjectAsync();
+
+                            await writer.FlushAsync();
+                            json = sw.ToString();
+                        }
+                        else
+                        {
+                            json = string.Empty;
+                        }
+                        break;
+                    }
+                default:
+                    json = string.Empty;
+                    break;
+            }
+
+            return json;
+        }
+
         private string Serialize(SerializeMethod method, object value)
         {
             string json;
@@ -751,111 +957,111 @@ If attributes are not mentioned, default values are used in each case.
                     json = JsonConvert.SerializeObject(value, new IsoDateTimeConverter());
                     break;
                 case SerializeMethod.JsonNetLinq:
-                {
-                    TestClass c = value as TestClass;
-                    if (c != null)
                     {
-                        JObject o = new JObject(
-                            new JProperty("strings", new JArray(
-                                c.strings
-                                )),
-                            new JProperty("dictionary", new JObject(c.dictionary.Select(d => new JProperty(d.Key, d.Value)))),
-                            new JProperty("Name", c.Name),
-                            new JProperty("Now", c.Now),
-                            new JProperty("BigNumber", c.BigNumber),
-                            new JProperty("Address1", new JObject(
-                                new JProperty("Street", c.Address1.Street),
-                                new JProperty("Phone", c.Address1.Phone),
-                                new JProperty("Entered", c.Address1.Entered))),
-                            new JProperty("Addresses", new JArray(c.Addresses.Select(a =>
-                                new JObject(
-                                    new JProperty("Street", a.Street),
-                                    new JProperty("Phone", a.Phone),
-                                    new JProperty("Entered", a.Entered)))))
-                            );
+                        TestClass c = value as TestClass;
+                        if (c != null)
+                        {
+                            JObject o = new JObject(
+                                new JProperty("strings", new JArray(
+                                    c.strings
+                                    )),
+                                new JProperty("dictionary", new JObject(c.dictionary.Select(d => new JProperty(d.Key, d.Value)))),
+                                new JProperty("Name", c.Name),
+                                new JProperty("Now", c.Now),
+                                new JProperty("BigNumber", c.BigNumber),
+                                new JProperty("Address1", new JObject(
+                                    new JProperty("Street", c.Address1.Street),
+                                    new JProperty("Phone", c.Address1.Phone),
+                                    new JProperty("Entered", c.Address1.Entered))),
+                                new JProperty("Addresses", new JArray(c.Addresses.Select(a =>
+                                    new JObject(
+                                        new JProperty("Street", a.Street),
+                                        new JProperty("Phone", a.Phone),
+                                        new JProperty("Entered", a.Entered)))))
+                                );
 
-                        json = o.ToString(Formatting.None);
+                            json = o.ToString(Formatting.None);
+                        }
+                        else
+                        {
+                            json = string.Empty;
+                        }
+                        break;
                     }
-                    else
-                    {
-                        json = string.Empty;
-                    }
-                    break;
-                }
                 case SerializeMethod.JsonNetManual:
-                {
-                    TestClass c = value as TestClass;
-                    if (c != null)
                     {
-                        StringWriter sw = new StringWriter();
-                        JsonTextWriter writer = new JsonTextWriter(sw);
-                        writer.WriteStartObject();
-                        writer.WritePropertyName("strings");
-                        writer.WriteStartArray();
-                        foreach (string s in c.strings)
+                        TestClass c = value as TestClass;
+                        if (c != null)
                         {
-                            writer.WriteValue(s);
-                        }
-                        writer.WriteEndArray();
-                        writer.WritePropertyName("dictionary");
-                        writer.WriteStartObject();
-                        foreach (KeyValuePair<string, int> keyValuePair in c.dictionary)
-                        {
-                            writer.WritePropertyName(keyValuePair.Key);
-                            writer.WriteValue(keyValuePair.Value);
-                        }
-                        writer.WriteEndObject();
-                        writer.WritePropertyName("Name");
-                        writer.WriteValue(c.Name);
-                        writer.WritePropertyName("Now");
-                        writer.WriteValue(c.Now);
-                        writer.WritePropertyName("BigNumber");
-                        writer.WriteValue(c.BigNumber);
-                        writer.WritePropertyName("Address1");
-                        writer.WriteStartObject();
-                        writer.WritePropertyName("Street");
-                        writer.WriteValue(c.BigNumber);
-                        writer.WritePropertyName("Street");
-                        writer.WriteValue(c.BigNumber);
-                        writer.WritePropertyName("Street");
-                        writer.WriteValue(c.BigNumber);
-                        writer.WriteEndObject();
-                        writer.WritePropertyName("Addresses");
-                        writer.WriteStartArray();
-                        foreach (Address address in c.Addresses)
-                        {
+                            StringWriter sw = new StringWriter();
+                            JsonTextWriter writer = new JsonTextWriter(sw);
+                            writer.WriteStartObject();
+                            writer.WritePropertyName("strings");
+                            writer.WriteStartArray();
+                            foreach (string s in c.strings)
+                            {
+                                writer.WriteValue(s);
+                            }
+                            writer.WriteEndArray();
+                            writer.WritePropertyName("dictionary");
+                            writer.WriteStartObject();
+                            foreach (KeyValuePair<string, int> keyValuePair in c.dictionary)
+                            {
+                                writer.WritePropertyName(keyValuePair.Key);
+                                writer.WriteValue(keyValuePair.Value);
+                            }
+                            writer.WriteEndObject();
+                            writer.WritePropertyName("Name");
+                            writer.WriteValue(c.Name);
+                            writer.WritePropertyName("Now");
+                            writer.WriteValue(c.Now);
+                            writer.WritePropertyName("BigNumber");
+                            writer.WriteValue(c.BigNumber);
+                            writer.WritePropertyName("Address1");
                             writer.WriteStartObject();
                             writer.WritePropertyName("Street");
-                            writer.WriteValue(address.Street);
-                            writer.WritePropertyName("Phone");
-                            writer.WriteValue(address.Phone);
-                            writer.WritePropertyName("Entered");
-                            writer.WriteValue(address.Entered);
+                            writer.WriteValue(c.BigNumber);
+                            writer.WritePropertyName("Street");
+                            writer.WriteValue(c.BigNumber);
+                            writer.WritePropertyName("Street");
+                            writer.WriteValue(c.BigNumber);
                             writer.WriteEndObject();
+                            writer.WritePropertyName("Addresses");
+                            writer.WriteStartArray();
+                            foreach (Address address in c.Addresses)
+                            {
+                                writer.WriteStartObject();
+                                writer.WritePropertyName("Street");
+                                writer.WriteValue(address.Street);
+                                writer.WritePropertyName("Phone");
+                                writer.WriteValue(address.Phone);
+                                writer.WritePropertyName("Entered");
+                                writer.WriteValue(address.Entered);
+                                writer.WriteEndObject();
+                            }
+                            writer.WriteEndArray();
+                            writer.WriteEndObject();
+
+                            writer.Flush();
+                            json = sw.ToString();
                         }
-                        writer.WriteEndArray();
-                        writer.WriteEndObject();
-
-                        writer.Flush();
-                        json = sw.ToString();
+                        else
+                        {
+                            json = string.Empty;
+                        }
+                        break;
                     }
-                    else
-                    {
-                        json = string.Empty;
-                    }
-                    break;
-                }
                 case SerializeMethod.JsonNetBinary:
-                {
-                    MemoryStream ms = new MemoryStream(Buffer);
-                    JsonSerializer serializer = new JsonSerializer();
-                    BsonWriter writer = new BsonWriter(ms);
-                    serializer.Serialize(writer, value);
+                    {
+                        MemoryStream ms = new MemoryStream(Buffer);
+                        JsonSerializer serializer = new JsonSerializer();
+                        BsonWriter writer = new BsonWriter(ms);
+                        serializer.Serialize(writer, value);
 
-                    //json = BitConverter.ToString(ms.ToArray(), 0, (int)ms.Position);
-                    json = "Bytes = " + ms.Position;
-                    break;
-                }
+                        //json = BitConverter.ToString(ms.ToArray(), 0, (int)ms.Position);
+                        json = "Bytes = " + ms.Position;
+                        break;
+                    }
                 case SerializeMethod.JavaScriptSerializer:
                     json = SerializeWebExtensions(value);
                     break;
@@ -918,6 +1124,35 @@ If attributes are not mentioned, default values are used in each case.
             Console.WriteLine();
         }
 
+        public async Task BenchmarkDeserializeMethodAsync<T>(SerializeMethod method, object json, int? iterations = null, bool warmUp = true)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+
+            if (warmUp)
+            {
+                await DeserializeAsync<T>(method, json);
+            }
+
+            Stopwatch timed = new Stopwatch();
+            timed.Start();
+
+            iterations = iterations ?? Iterations;
+
+            T value = default(T);
+            for (int x = 0; x < iterations.Value; x++)
+            {
+                value = await DeserializeAsync<T>(method, json);
+            }
+
+            timed.Stop();
+
+            Console.WriteLine("Deserialize method: {0}", method);
+            Console.WriteLine("{0} ms", timed.ElapsedMilliseconds);
+            Console.WriteLine(value);
+            Console.WriteLine();
+        }
+
         public T DeserializeJsonNet<T>(string json, bool isoDateTimeConverter)
         {
             Type type = typeof(T);
@@ -938,6 +1173,66 @@ If attributes are not mentioned, default values are used in each case.
                 var value = (T)serializer.Deserialize(reader, type);
                 return value;
             }
+        }
+
+        public async Task<TestClass> DeserializeJsonNetManualAsync(string json)
+        {
+            TestClass c = new TestClass();
+
+            JsonTextReader reader = new JsonTextReader(new StringReader(json));
+            await reader.ReadAsync();
+            while (await reader.ReadAsync())
+            {
+                if (reader.TokenType == JsonToken.PropertyName)
+                {
+                    string propertyName = (string)reader.Value;
+                    switch (propertyName)
+                    {
+                        case "strings":
+                            await reader.ReadAsync();
+                            while (await reader.ReadAsync() && reader.TokenType != JsonToken.EndArray)
+                            {
+                                c.strings.Add((string)reader.Value);
+                            }
+                            break;
+                        case "dictionary":
+                            await reader.ReadAsync();
+                            while (await reader.ReadAsync() && reader.TokenType != JsonToken.EndObject)
+                            {
+                                string key = (string)reader.Value;
+                                c.dictionary.Add(key, reader.ReadAsInt32().GetValueOrDefault());
+                            }
+                            break;
+                        case "Name":
+                            c.Name = reader.ReadAsString();
+                            break;
+                        case "Now":
+                            c.Now = reader.ReadAsDateTime().GetValueOrDefault();
+                            break;
+                        case "BigNumber":
+                            c.BigNumber = reader.ReadAsDecimal().GetValueOrDefault();
+                            break;
+                        case "Address1":
+                            await reader.ReadAsync();
+                            c.Address1 = CreateAddress(reader);
+                            break;
+                        case "Addresses":
+                            await reader.ReadAsync();
+                            while (await reader.ReadAsync() && reader.TokenType != JsonToken.EndArray)
+                            {
+                                var address = CreateAddress(reader);
+                                c.Addresses.Add(address);
+                            }
+                            break;
+                    }
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            return c;
         }
 
         public TestClass DeserializeJsonNetManual(string json)
@@ -1054,6 +1349,22 @@ If attributes are not mentioned, default values are used in each case.
             MemoryStream ms = new MemoryStream(Encoding.UTF8.GetBytes(json));
 
             return (T)dataContractSerializer.ReadObject(ms);
+        }
+
+        private async Task<T> DeserializeAsync<T>(SerializeMethod method, object json)
+        {
+            switch (method)
+            {
+                case SerializeMethod.JsonNetManualAsync:
+                    if (typeof(T) == typeof(TestClass))
+                    {
+                        return (T)(object)await DeserializeJsonNetManualAsync((string)json);
+                    }
+
+                    return default(T);
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(method));
+            }
         }
 
         private T Deserialize<T>(SerializeMethod method, object json)
