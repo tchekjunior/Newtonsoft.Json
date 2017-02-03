@@ -285,8 +285,8 @@ namespace Newtonsoft.Json.Serialization
 
             MemberSerialization memberSerialization = JsonTypeReflector.GetObjectMemberSerialization(objectType, ignoreSerializableAttribute);
 
-            List<MemberInfo> allMembers = ReflectionUtils.GetFieldsAndProperties(objectType, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                .Where(m => !ReflectionUtils.IsIndexedProperty(m)).ToList();
+            IEnumerable<MemberInfo> allMembers = ReflectionUtils.GetFieldsAndProperties(objectType, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+                .Where(m => !ReflectionUtils.IsIndexedProperty(m));
 
             List<MemberInfo> serializableMembers = new List<MemberInfo>();
 
@@ -623,15 +623,17 @@ namespace Newtonsoft.Json.Serialization
 
         private ConstructorInfo GetAttributeConstructor(Type objectType)
         {
-            IList<ConstructorInfo> markedConstructors = objectType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Where(c => c.IsDefined(typeof(JsonConstructorAttribute), true)).ToList();
+            IEnumerator<ConstructorInfo> en = objectType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Where(c => c.IsDefined(typeof(JsonConstructorAttribute), true)).GetEnumerator();
 
-            if (markedConstructors.Count > 1)
+            if (en.MoveNext())
             {
-                throw new JsonException("Multiple constructors with the JsonConstructorAttribute.");
-            }
-            else if (markedConstructors.Count == 1)
-            {
-                return markedConstructors[0];
+                ConstructorInfo conInfo = en.Current;
+                if (en.MoveNext())
+                {
+                    throw new JsonException("Multiple constructors with the JsonConstructorAttribute.");
+                }
+
+                return conInfo;
             }
 
             // little hack to get Version objects to deserialize correctly
@@ -645,16 +647,25 @@ namespace Newtonsoft.Json.Serialization
 
         private ConstructorInfo GetParameterizedConstructor(Type objectType)
         {
-            IList<ConstructorInfo> constructors = objectType.GetConstructors(BindingFlags.Public | BindingFlags.Instance).ToList();
-
-            if (constructors.Count == 1)
+#if PORTABLE
+            IEnumerable<ConstructorInfo> constructors = objectType.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+            IEnumerator<ConstructorInfo> en = constructors.GetEnumerator();
+            if (en.MoveNext())
+            {
+                ConstructorInfo conInfo = en.Current;
+                if (!en.MoveNext())
+                {
+                    return conInfo;
+                }
+            }
+#else
+            ConstructorInfo[] constructors = objectType.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+            if (constructors.Length == 1)
             {
                 return constructors[0];
             }
-            else
-            {
-                return null;
-            }
+#endif
+            return null;
         }
 
         /// <summary>
@@ -778,7 +789,7 @@ namespace Newtonsoft.Json.Serialization
 
             contract.Converter = ResolveContractConverter(contract.NonNullableUnderlyingType);
 
-            // then see whether object is compadible with any of the built in converters
+            // then see whether object is compatible with any of the built in converters
             contract.InternalConverter = JsonSerializer.GetMatchingConverter(BuiltInConverters, contract.NonNullableUnderlyingType);
 
             if (contract.IsInstantiable
@@ -1300,7 +1311,7 @@ namespace Newtonsoft.Json.Serialization
                 return type.FullName;
             }
 
-            return string.Format(CultureInfo.InvariantCulture, "{0}.{1}", new object[] { type.Namespace, type.Name });
+            return "{0}.{1}".FormatWith(CultureInfo.InvariantCulture, type.Namespace, type.Name);
         }
 
         /// <summary>
@@ -1314,7 +1325,7 @@ namespace Newtonsoft.Json.Serialization
             List<MemberInfo> members = GetSerializableMembers(type);
             if (members == null)
             {
-                throw new JsonSerializationException("Null collection of seralizable members returned.");
+                throw new JsonSerializationException("Null collection of serializable members returned.");
             }
 
             JsonPropertyCollection properties = new JsonPropertyCollection(type);
@@ -1427,13 +1438,13 @@ namespace Newtonsoft.Json.Serialization
 
             string mappedName;
             bool hasSpecifiedName;
-            if (propertyAttribute != null && propertyAttribute.PropertyName != null)
+            if (propertyAttribute?.PropertyName != null)
             {
                 mappedName = propertyAttribute.PropertyName;
                 hasSpecifiedName = true;
             }
 #if !NET20
-            else if (dataMemberAttribute != null && dataMemberAttribute.Name != null)
+            else if (dataMemberAttribute?.Name != null)
             {
                 mappedName = dataMemberAttribute.Name;
                 hasSpecifiedName = true;
@@ -1542,7 +1553,7 @@ namespace Newtonsoft.Json.Serialization
 
             property.ItemIsReference = (propertyAttribute != null) ? propertyAttribute._itemIsReference : null;
             property.ItemConverter =
-                (propertyAttribute != null && propertyAttribute.ItemConverterType != null)
+                (propertyAttribute?.ItemConverterType != null)
                     ? JsonTypeReflector.CreateJsonConverterInstance(propertyAttribute.ItemConverterType, propertyAttribute.ItemConverterParameters)
                     : null;
             property.ItemReferenceLoopHandling = (propertyAttribute != null) ? propertyAttribute._itemReferenceLoopHandling : null;

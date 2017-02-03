@@ -177,13 +177,9 @@ namespace Newtonsoft.Json.Linq
         /// <param name="name">The name of the property.</param>
         public override void WritePropertyName(string name)
         {
-            JObject o = _parent as JObject;
-            if (o != null)
-            {
-                // avoid duplicate property name exception
-                // last property name wins
-                o.Remove(name);
-            }
+            // avoid duplicate property name exception
+            // last property name wins
+            (_parent as JObject)?.Remove(name);
 
             AddParent(new JProperty(name));
 
@@ -493,7 +489,7 @@ namespace Newtonsoft.Json.Linq
         {
             JTokenReader tokenReader = reader as JTokenReader;
 
-            // closing the token wrather than reading then writing it doesn't lose some type information, e.g. Guid, byte[], etc
+            // cloning the token rather than reading then writing it doesn't lose some type information, e.g. Guid, byte[], etc
             if (tokenReader != null && writeChildren && writeDateConstructorAsDate && writeComments)
             {
                 if (tokenReader.TokenType == JsonToken.None)

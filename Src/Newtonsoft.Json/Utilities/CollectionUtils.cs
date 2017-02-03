@@ -139,7 +139,7 @@ namespace Newtonsoft.Json.Utilities
                         break;
                     }
 
-                    // incase we can't find an exact match, use first inexact
+                    // in case we can't find an exact match, use first inexact
                     if (match == null)
                     {
                         if (parameterType.IsAssignableFrom(constructorArgumentType))
@@ -268,9 +268,10 @@ namespace Newtonsoft.Json.Utilities
                 }
 
                 object v = currentArray[0];
-                if (v is IList)
+                IList list = v as IList;
+                if (list != null)
                 {
-                    currentArray = (IList)v;
+                    currentArray = list;
                 }
                 else
                 {

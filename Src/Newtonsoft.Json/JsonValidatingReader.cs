@@ -97,7 +97,7 @@ namespace Newtonsoft.Json
 
             private IEnumerable<string> GetRequiredProperties(JsonSchemaModel schema)
             {
-                if (schema == null || schema.Properties == null)
+                if (schema?.Properties == null)
                 {
                     return Enumerable.Empty<string>();
                 }
@@ -358,9 +358,9 @@ namespace Newtonsoft.Json
         public override void Close()
         {
             base.Close();
-            if (CloseInput && _reader != null)
+            if (CloseInput)
             {
-                _reader.Close();
+                _reader?.Close();
             }
         }
 
@@ -710,15 +710,14 @@ namespace Newtonsoft.Json
 
             Dictionary<string, bool> requiredProperties = _currentScope.RequiredProperties;
 
-            if (requiredProperties != null)
+            if (requiredProperties != null && requiredProperties.Values.Any(v => !v))
             {
-                List<string> unmatchedRequiredProperties =
-                    requiredProperties.Where(kv => !kv.Value).Select(kv => kv.Key).ToList();
-
-                if (unmatchedRequiredProperties.Count > 0)
-                {
-                    RaiseError("Required properties are missing from object: {0}.".FormatWith(CultureInfo.InvariantCulture, string.Join(", ", unmatchedRequiredProperties.ToArray())), schema);
-                }
+                IEnumerable<string> unmatchedRequiredProperties = requiredProperties.Where(kv => !kv.Value).Select(kv => kv.Key);
+                RaiseError("Required properties are missing from object: {0}.".FormatWith(CultureInfo.InvariantCulture, string.Join(", ", unmatchedRequiredProperties
+#if NET20 || NET35
+                    .ToArray()
+#endif
+                    )), schema);
             }
         }
 
@@ -890,7 +889,7 @@ namespace Newtonsoft.Json
 
                 foreach (JsonSchemaModel currentSchema in CurrentSchemas)
                 {
-                    // if there is positional validation and the array index is past the number of item validation schemas and there is no additonal items then error
+                    // if there is positional validation and the array index is past the number of item validation schemas and there are no additional items then error
                     if (currentSchema != null
                         && currentSchema.PositionalItemsValidation
                         && !currentSchema.AllowAdditionalItems

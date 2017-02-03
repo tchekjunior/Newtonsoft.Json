@@ -377,11 +377,11 @@ namespace Newtonsoft.Json.Serialization
                 // member attribute converter
                 converter = memberConverter;
             }
-            else if (containerProperty != null && containerProperty.ItemConverter != null)
+            else if (containerProperty?.ItemConverter != null)
             {
                 converter = containerProperty.ItemConverter;
             }
-            else if (containerContract != null && containerContract.ItemConverter != null)
+            else if (containerContract?.ItemConverter != null)
             {
                 converter = containerContract.ItemConverter;
             }
@@ -1083,13 +1083,13 @@ namespace Newtonsoft.Json.Serialization
                 return true;
             }
 
-            // test tokentype here because null might not be convertable to some types, e.g. ignoring null when applied to DateTime
+            // test tokenType here because null might not be convertible to some types, e.g. ignoring null when applied to DateTime
             if (property.NullValueHandling.GetValueOrDefault(Serializer._nullValueHandling) == NullValueHandling.Ignore && tokenType == JsonToken.Null)
             {
                 return true;
             }
 
-            // test tokentype here because default value might not be convertable to actual type, e.g. default of "" for DateTime
+            // test tokenType here because default value might not be convertible to actual type, e.g. default of "" for DateTime
             if (HasFlag(property.DefaultValueHandling.GetValueOrDefault(Serializer._defaultValueHandling), DefaultValueHandling.Ignore)
                 && !HasFlag(property.DefaultValueHandling.GetValueOrDefault(Serializer._defaultValueHandling), DefaultValueHandling.Populate)
                 && JsonTokenUtils.IsPrimitiveToken(tokenType)
@@ -1320,7 +1320,8 @@ namespace Newtonsoft.Json.Serialization
             }
 
             JsonConverter dictionaryValueConverter = contract.ItemConverter ?? GetConverter(contract.ItemContract, null, contract, containerProperty);
-            PrimitiveTypeCode keyTypeCode = (contract.KeyContract is JsonPrimitiveContract) ? ((JsonPrimitiveContract)contract.KeyContract).TypeCode : PrimitiveTypeCode.Empty;
+            JsonPrimitiveContract keyContract = contract.KeyContract as JsonPrimitiveContract;
+            PrimitiveTypeCode keyTypeCode = (keyContract != null) ? keyContract.TypeCode : PrimitiveTypeCode.Empty;
 
             bool finished = false;
             do
@@ -1891,14 +1892,18 @@ namespace Newtonsoft.Json.Serialization
         {
             ValidationUtils.ArgumentNotNull(creator, nameof(creator));
 
-            // only need to keep a track of properies presence if they are required or a value should be defaulted if missing
+            // only need to keep a track of properties' presence if they are required or a value should be defaulted if missing
             bool trackPresence = (contract.HasRequiredOrDefaultValueProperties || HasFlag(Serializer._defaultValueHandling, DefaultValueHandling.Populate));
 
             Type objectType = contract.UnderlyingType;
 
             if (TraceWriter != null && TraceWriter.LevelFilter >= TraceLevel.Info)
             {
-                string parameters = string.Join(", ", contract.CreatorParameters.Select(p => p.PropertyName).ToArray());
+                string parameters = string.Join(", ", contract.CreatorParameters.Select(p => p.PropertyName)
+#if NET20 || NET35
+                    .ToArray()
+#endif
+                    );
                 TraceWriter.Trace(TraceLevel.Info, JsonPosition.FormatMessage(reader as IJsonLineInfo, reader.Path, "Deserializing {0} using creator with parameters: {1}.".FormatWith(CultureInfo.InvariantCulture, contract.UnderlyingType, parameters)), null);
             }
 
@@ -2304,7 +2309,7 @@ namespace Newtonsoft.Json.Serialization
         {
             OnDeserializing(reader, contract, newObject);
 
-            // only need to keep a track of properies presence if they are required or a value should be defaulted if missing
+            // only need to keep a track of properties' presence if they are required or a value should be defaulted if missing
             Dictionary<JsonProperty, PropertyPresence> propertiesPresence = (contract.HasRequiredOrDefaultValueProperties || HasFlag(Serializer._defaultValueHandling, DefaultValueHandling.Populate))
                 ? contract.Properties.ToDictionary(m => m, m => PropertyPresence.None)
                 : null;
